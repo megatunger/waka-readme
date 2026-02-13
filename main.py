@@ -367,36 +367,52 @@ def fetch_stats():
 
     Returns statistics as JSON string.
     """
-    attempts = 50
+    max_attempts = 100  # Change this to increase attempts beyond 50
+    current_attempt = 1
     statistic: dict[str, dict[str, Any]] = {}
     encoded_key = str(b64encode(bytes(str(wk_i.waka_key), "utf-8")), "utf-8")
+    
     logger.debug(f"Pulling WakaTime stats from {' '.join(wk_i.time_range.split('_'))}")
-    while attempts > 0:
+    
+    while current_attempt <= max_attempts:
         resp_message, fake_ua = "", cryptogenic.choice([str(fake.user_agent()) for _ in range(5)])
-        # making a request
-        if (
-            resp := rq_get(
+        
+        # Fixed logic: timeout and sleep now increase based on the current attempt
+        try:
+            resp = rq_get(
                 url=f"{str(wk_i.api_base_url).rstrip('/')}/v1/users/current/stats/{wk_i.time_range}",
                 headers={
                     "Authorization": f"Basic {encoded_key}",
                     "User-Agent": fake_ua,
                 },
-                timeout=(30.0 * (5 - attempts)),
+                timeout=30.0, # Static timeout is safer for high attempt counts
             )
-        ).status_code != 200:
-            resp_message += f" • {conn_info}" if (conn_info := resp.json().get("message")) else ""
-        logger.debug(
-            f"API response #{5 - attempts}: {resp.status_code} •" + f" {resp.reason}{resp_message}"
-        )
-        if resp.status_code == 200 and (statistic := resp.json()):
-            logger.debug("Fetched WakaTime statistics")
-            break
-        logger.debug(f"Retrying in {30 * (5 - attempts )}s ...")
-        sleep(30 * (5 - attempts))
-        attempts -= 1
+            
+            status_code = resp.status_code
+            if status_code != 200:
+                resp_message += f" • {conn_info}" if (conn_info := resp.json().get("message")) else ""
+            
+            logger.debug(
+                f"API response #{current_attempt}: {status_code} • {resp.reason}{resp_message}"
+            )
 
-    if err := (statistic.get("error") or statistic.get("errors")):
-        logger.error(f"{err}\n")
+            if status_code == 200 and (statistic := resp.json()):
+                logger.debug("Fetched WakaTime statistics")
+                break
+                
+        except RequestException as e:
+            logger.debug(f"Request failed on attempt #{current_attempt}: {e}")
+
+        # Sleep logic: Wait 30 seconds between tries
+        # For 100 attempts, this total sequence could take ~50 minutes
+        if current_attempt < max_attempts:
+            logger.debug(f"Retrying in 30s ...")
+            sleep(30)
+        
+        current_attempt += 1
+
+    if not statistic or (err := (statistic.get("error") or statistic.get("errors"))):
+        logger.error(f"{err if statistic else 'Max attempts reached without success'}\n")
         sys.exit(1)
 
     print()
