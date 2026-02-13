@@ -367,7 +367,7 @@ def fetch_stats():
 
     Returns statistics as JSON string.
     """
-    attempts = 4
+    attempts = 50
     statistic: dict[str, dict[str, Any]] = {}
     encoded_key = str(b64encode(bytes(str(wk_i.waka_key), "utf-8")), "utf-8")
     logger.debug(f"Pulling WakaTime stats from {' '.join(wk_i.time_range.split('_'))}")
